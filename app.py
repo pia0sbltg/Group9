@@ -7,7 +7,7 @@ import threading
 import time
 import random
 import json
-import csv  # Import the CSV module
+import csv
 
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -26,6 +26,7 @@ class LMStudioAgent:
         self.history = [
             {"role": "system", "content": starting_prompt}
         ]
+        self.stop_event = threading.Event()
 
     def reset_history(self):
         self.history = [
@@ -39,32 +40,35 @@ class LMStudioAgent:
         context_tokens = int(TOKEN_LIMIT * 0.5)
         context = self._get_context(context_tokens)
         
-        completion = self.client.chat.completions.create(
-            model=self.model,
-            messages=context,
-            temperature=self.temperature,
-            stream=True,
-        )
-
-        new_message = {"role": "assistant", "content": ""}
-        for chunk in completion:
-            if chunk.choices[0].delta.content:
-                new_message["content"] += chunk.choices[0].delta.content
-                socketio.emit('new_message', {'role': self.name, 'content': new_message["content"]})
-
-        self.history.append(new_message)
-        
-        # Save the final message to a CSV file
-        # try to save the message to a csv file, in case it fails, it will not break the code
         try:
-            self.save_message_to_csv(new_message["content"])
-        except:
-            # if saving still fails, print an error message
-            print("Error saving message to CSV")
-            # skip the line and continue
-            pass
-        
-        return new_message["content"]
+            completion = self.client.chat.completions.create(
+                model=self.model,
+                messages=context,
+                temperature=self.temperature,
+                stream=True,
+            )
+
+            new_message = {"role": "assistant", "content": ""}
+            for chunk in completion:
+                if self.stop_event.is_set():
+                    break
+                if chunk.choices[0].delta.content:
+                    new_message["content"] += chunk.choices[0].delta.content
+                    socketio.emit('new_message', {'role': self.name, 'content': new_message["content"]})
+
+            self.history.append(new_message)
+            
+            # Save the final message to a CSV file
+            try:
+                self.save_message_to_csv(new_message["content"])
+            except:
+                print("Error saving message to CSV")
+                pass
+
+            return new_message["content"]
+        except Exception as e:
+            print(f"Error during response generation: {e}")
+            return ""
 
     def _get_context(self, context_tokens):
         # Create a context with the last `context_tokens` tokens
@@ -83,11 +87,11 @@ class LMStudioAgent:
             writer = csv.writer(file)
             writer.writerow([self.name, message])
 
-def load_agents_from_config(config_file):
+def load_agents_from_config(config_file, set_name):
     with open(config_file, 'r') as f:
         config = json.load(f)
     agents = []
-    for agent_config in config:
+    for agent_config in config[set_name]:
         agent = LMStudioAgent(
             name=agent_config["name"],
             api_url=agent_config["api_url"],
@@ -99,7 +103,8 @@ def load_agents_from_config(config_file):
         agents.append(agent)
     return agents
 
-agents = load_agents_from_config('agents_config.json')
+agents = load_agents_from_config('agents_config.json', 'set1')
+stop_event = threading.Event()
 
 @app.route('/')
 def index():
@@ -113,21 +118,41 @@ def handle_start_conversation(data):
     for agent in agents:
         agent.reset_history()
         agent.history.append({"role": "user", "content": topic})
+        agent.stop_event.clear()
 
+    stop_event.clear()
     threading.Thread(target=run_conversation, args=(agents, topic)).start()
+
+@socketio.on('switch_agent_set')
+def handle_switch_agent_set(data):
+    set_name = data['set_name']
+    global agents
+    agents = load_agents_from_config('agents_config.json', set_name)
+    print(f"Switched to agent set: {set_name}")
 
 def run_conversation(agents, initial_message, num_turns=15):
     message = initial_message
     last_agent = None
     
     for _ in range(num_turns):
+        if stop_event.is_set():
+            break
         available_agents = [agent for agent in agents if agent != last_agent]
         agent = random.choice(available_agents)
         response = agent.respond(message)
+        if stop_event.is_set():
+            break
         socketio.emit('new_message', {'role': agent.name, 'content': response})
         message = response
         last_agent = agent
-        time.sleep(1)  # Add a delay between messages
+        time.sleep(1)
+
+@socketio.on('stop_generation')
+def handle_stop_generation():
+    stop_event.set()
+    for agent in agents:
+        agent.stop_event.set()
+    socketio.emit('new_message', {'role': 'system', 'content': "Conversation stopped by user"})
 
 if __name__ == '__main__':
     socketio.run(app, debug=True)

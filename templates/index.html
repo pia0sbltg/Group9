@@ -1,45 +1,129 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <title>Agent Chat</title>
     <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
     <style>
-        .message {
-            margin-bottom: 10px;
+        body {
+            background-color: #121212;
+            color: #e0e0e0;
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            height: 100vh;
+            justify-content: center;
         }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #86fcbd;
+        }
+
         #chat {
             max-height: 400px;
             overflow-y: auto;
-            border: 1px solid #ccc;
+            border: 1px solid #333;
             padding: 10px;
+            width: 80%;
+            max-width: 600px;
+            background-color: #1e1e1e;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+
+        .message:nth-child(odd) {
+            background-color: #333;
+        }
+
+        .message:nth-child(even) {
+            background-color: #444;
+        }
+
+        input[type="text"] {
+            width: calc(80% - 110px);
+            max-width: 490px;
+            padding: 10px;
+            margin-right: 10px;
+            border: 1px solid #333;
+            margin-top: 0.5rem;
+            border-radius: 5px;
+            background-color: #1e1e1e;
+            color: #e0e0e0;
+        }
+
+        button {
+            padding: 10px;
+            background-color: #86fcbd;
+            border: none;
+            border-radius: 5px;
+            color: #121212;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #86fcbd;
+        }
+
+        .agent-switch-buttons {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .mainButton {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        #stopButton {
+            background-color: #ad82f3;
         }
     </style>
 </head>
+
 <body>
-    <h1>Chat with Agents</h1>
+    <div class="agent-switch-buttons">
+        <button onclick="switchAgentSet('set1', 'FriendsChat')">FriendsChat</button>
+        <button onclick="switchAgentSet('set2', 'AvengersChat')">AvengersChat</button>
+        <button onclick="switchAgentSet('set3', 'ProfessionalsChat')">ProfessionalsChat</button>
+        <button onclick="switchAgentSet('set4', 'SoraticChat')">SocraticChat</button>
+    </div>
+    <h1 id="chat-header">Chat with Agents</h1>
     <div id="chat"></div>
-    <input type="text" id="topic_input" placeholder="Enter a topic..." autocomplete="off"/>
-    <button onclick="startConversation()">Start Conversation</button>
+    <input type="text" id="topic_input" placeholder="Enter a topic..." autocomplete="off" />
+    <button class='mainButton'onclick="startConversation()">Start</button>
+
+    <button class='mainButton'id="stopButton">Stop Conversation</button>
 
     <script>
         var socket = io.connect('http://127.0.0.1:5000');
         var currentMessageContainer = null;
         var currentRole = null;
 
-        socket.on('new_message', function(msg) {
+        socket.on('new_message', function (msg) {
             var chat = document.getElementById('chat');
 
-            // Check if the role has changed or if there is no current message container
             if (currentRole !== msg.role || !currentMessageContainer) {
-                // Create a new message container for each new message
+
                 currentMessageContainer = document.createElement('div');
                 currentMessageContainer.className = 'message';
                 chat.appendChild(currentMessageContainer);
                 currentRole = msg.role;
             }
 
-            // Update the current message container with the new content
             currentMessageContainer.textContent = `${msg.role}: ${msg.content}`;
             chat.scrollTop = chat.scrollHeight;  // Scroll to the bottom
         });
@@ -47,9 +131,18 @@
         function startConversation() {
             var input = document.getElementById('topic_input');
             var topic = input.value;
-            socket.emit('start_conversation', {topic: topic});
+            socket.emit('start_conversation', { topic: topic });
             input.value = '';
+        }
+        document.getElementById('stopButton').addEventListener('click', function () {
+            socket.emit('stop_generation');
+        });
+
+        function switchAgentSet(setName, setTitle) {
+            socket.emit('switch_agent_set', { set_name: setName });
+            document.getElementById('chat-header').textContent = setTitle;
         }
     </script>
 </body>
+
 </html>
